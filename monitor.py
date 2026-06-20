@@ -109,14 +109,17 @@ def parse_retroarch_status(raw_status):
     else:
         return parsed
 
-    system_id, separator, remainder = details.partition(",")
+    system_id = details
+    remainder = ""
+    if "," in details:
+        system_id, remainder = details.split(",", 1)
     system_id = system_id.strip()
     game_name = ""
-    if separator:
+    if remainder:
         game_name = remainder.strip()
         # RetroArch appends ",crc32=<value>" after content basename.
-        base_name, crc_separator, _ = game_name.rpartition(",crc32=")
-        if crc_separator:
+        if ",crc32=" in game_name:
+            base_name, _, _ = game_name.rpartition(",crc32=")
             game_name = base_name.strip()
 
     if system_id and system_id.lower() != "unknown":
