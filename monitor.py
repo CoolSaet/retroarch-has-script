@@ -119,11 +119,12 @@ def parse_retroarch_status(raw_status):
         game_name = remainder.strip()
         # RetroArch appends ",crc32=<value>" after content basename.
         if ",crc32=" in game_name:
-            base_name, _, _ = game_name.rpartition(",crc32=")
+            base_name, _, _ = game_name.partition(",crc32=")
             game_name = base_name.strip()
 
     if system_id and system_id.lower() != "unknown":
-        # Keep RetroArch-provided system_id formatting for display.
+        # Keep RetroArch-provided system_id formatting so downstream consumers
+        # match the same identifiers reported by RetroArch.
         parsed["game_type"] = system_id
         parsed["icon"] = get_icon_for_game_type(system_id)
     else:
