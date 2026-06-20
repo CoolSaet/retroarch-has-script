@@ -1,28 +1,51 @@
 import socket
 import requests
 import time
-import json
 from os import getenv
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Get these values from your .env file 
+# Get these values from your .env file
 HA_IP = getenv("HA_IP", "127.0.0.1")  # Home Assistant IP
 HA_TOKEN = getenv("HA_TOKEN", "")  # Home Assistant Long-Lived Access Token
-RA_IP = "127.0.0.1" # RetroArch IP
-RA_PORT = 55355   # Default RetroArch Network Port
+RA_IP = "127.0.0.1"  # RetroArch IP
+RA_PORT = 55355  # Default RetroArch Network Port
 CHECK_INTERVAL = 5  # Seconds between checks
 
 HA_URL = f"http://{HA_IP}:8123/api/states/sensor.retroarch_status"
 HEADERS = {
-    "Authorization": f"Bearer {HA_TOKEN}",
+    "Authorization": "Bearer " + HA_TOKEN,
     "Content-Type": "application/json",
 }
 
+ICON_KEYWORDS = [
+    ("gamecube", "mdi:nintendo-wii"),
+    ("wii", "mdi:nintendo-wii"),
+    ("snes", "mdi:nintendo-snes"),
+    ("super nintendo", "mdi:nintendo-snes"),
+    ("nes", "mdi:nintendo-nes"),
+    ("famicom", "mdi:nintendo-nes"),
+    ("genesis", "mdi:sega-genesis"),
+    ("mega drive", "mdi:sega-genesis"),
+    ("playstation", "mdi:sony-playstation"),
+    ("psx", "mdi:sony-playstation"),
+    ("psp", "mdi:sony-playstation"),
+    ("nintendo 64", "mdi:nintendo-64"),
+    ("n64", "mdi:nintendo-64"),
+    ("game boy", "mdi:nintendo-gameboy"),
+    ("gameboy", "mdi:nintendo-gameboy"),
+    ("gba", "mdi:nintendo-gameboy"),
+    ("dreamcast", "mdi:sega-dreamcast"),
+    ("mame", "mdi:arcade"),
+    ("arcade", "mdi:arcade"),
+]
+
+
 def get_retroarch_status():
     """Queries RetroArch via UDP for current status."""
+    sock = None
     try:
         # RetroArch uses UDP for network commands
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -37,13 +60,76 @@ def get_retroarch_status():
         print(f"Error communicating with RetroArch: {e}")
         return "ERROR"
     finally:
-        sock.close()
+        if sock:
+            sock.close()
+
+
+def get_icon_for_game_type(game_type):
+    """Map game type text to a Home Assistant icon."""
+    game_type_lower = game_type.lower()
+    for keyword, icon in ICON_KEYWORDS:
+        if keyword in game_type_lower:
+            return icon
+    return "mdi:controller"
+
+
+def parse_retroarch_status(raw_status):
+    """Parse RetroArch GET_STATUS response into sensor fields."""
+    parsed = {
+        "state": "Idle",
+        "icon": "mdi:controller-off",
+        "game_type": "Unknown",
+        "game_name": "Unknown",
+    }
+
+    status_text = raw_status.strip()
+    if status_text == "DISCONNECTED":
+        return parsed
+
+    if status_text == "ERROR":
+        parsed["state"] = "Error"
+        parsed["icon"] = "mdi:alert-circle"
+        return parsed
+
+    if not status_text.startswith("GET_STATUS "):
+        return parsed
+
+    payload = status_text[len("GET_STATUS "):]
+    if payload == "CONTENTLESS":
+        parsed["state"] = "Stopped"
+        parsed["icon"] = "mdi:stop-circle"
+        return parsed
+
+    if payload.startswith("PAUSED "):
+        parsed["state"] = "Paused"
+        details = payload[len("PAUSED "):]
+    elif payload.startswith("PLAYING "):
+        parsed["state"] = "Playing"
+        details = payload[len("PLAYING "):]
+    else:
+        return parsed
+
+    parts = details.split(",")
+    system_id = parts[0].strip() if parts else ""
+    game_name = parts[1].strip() if len(parts) > 1 else ""
+
+    if system_id and system_id.upper() != "UNKNOWN":
+        parsed["game_type"] = system_id
+        parsed["icon"] = get_icon_for_game_type(system_id)
+    else:
+        parsed["icon"] = "mdi:controller"
+
+    if game_name:
+        parsed["game_name"] = game_name
+
+    return parsed
+
 
 def update_home_assistant(state, attributes):
     """Sends a POST request to Home Assistant to update the sensor."""
     payload = {
         "state": state,
-        "attributes": attributes
+        "attributes": attributes,
     }
     # Update Home Assistant with the new state and attributes
     print(f"Updating Home Assistant: {state} - {attributes['game_name']} ({attributes['game_type']})")
@@ -53,91 +139,25 @@ def update_home_assistant(state, attributes):
     except Exception as e:
         print(f"Error updating Home Assistant: {e}")
 
+
 def main():
     print(f"Monitoring RetroArch on {RA_IP}:{RA_PORT}...")
     while True:
         raw_status = get_retroarch_status()
-               
-        # Determine state and icon based on RetroArch response
-        # RetroArch returns "GET_STATUS PLAYING [core_name],[game_name]"
-        game_name = "Unknown"
-        game_type = "Unknown"
-
-        # Status
-        if "PLAYING" in raw_status:
-            state = "Playing"
-        elif "PAUSED" in raw_status:
-            state = "Paused"
-        elif "CONTENTLESS" in raw_status:
-            state = "Stopped"
-            icon = "mdi:stop-circle"
-        else:
-            state = "Idle"
-            icon = "mdi:controller-off"
-
-        # Game Type
-        if "gamecube" in raw_status.lower():
-            icon = "mdi:nintendo-wii"
-            game_type = "GameCube/Wii"
-        elif "snes" in raw_status.lower():
-            icon = "mdi:nintendo-snes"
-            game_type = "SNES"
-        elif "nes" in raw_status.lower():
-            icon = "mdi:nintendo-nes"
-            game_type = "NES"
-        elif "genesis" in raw_status.lower() or "megadrive" in raw_status.lower():
-            icon = "mdi:sega-genesis"
-            game_type = "Genesis/Mega Drive"
-        elif "ps1" in raw_status.lower() or "playstation" in raw_status.lower():
-            icon = "mdi:sony-playstation"
-            game_type = "PlayStation 1"
-        elif "ps2" in raw_status.lower():
-            icon = "mdi:sony-playstation"
-            game_type = "PlayStation 2"
-        elif "n64" in raw_status.lower() or "nintendo 64" in raw_status.lower():
-            icon = "mdi:nintendo-64"
-            game_type = "Nintendo 64"
-        elif "gba" in raw_status.lower():
-            icon = "mdi:nintendo-gameboy"
-            game_type = "Game Boy Advance"
-        elif "gb" in raw_status.lower() and "gba" not in raw_status.lower():
-            icon = "mdi:nintendo-gameboy"
-            game_type = "Game Boy"
-        elif "psp" in raw_status.lower():
-            icon = "mdi:sony-playstation"
-            game_type = "PlayStation Portable"
-        elif "dreamcast" in raw_status.lower():
-            icon = "mdi:sega-dreamcast"
-            game_type = "Dreamcast"
-        elif "mame" in raw_status.lower():
-            icon = "mdi:arcade"
-            game_type = "MAME Arcade"
-        else:
-            game_type = "Unknown"
-
-        # Game Name Extraction
-        game_name = "Unknown"
-        if "PLAYING" in raw_status:
-            try:
-                parts = raw_status.split("PLAYING")[1].strip().split(",")
-                if len(parts) >= 2:
-                    game_name = parts[1].strip()
-                elif len(parts) == 1:
-                    game_name = parts[0].strip()
-            except Exception as e:
-                print(f"Error parsing game name: {e}")
+        parsed = parse_retroarch_status(raw_status)
 
         # Create attributes dictionary for Home Assistant
         attributes = {
             "friendly_name": "RetroArch Status",
-            "icon": icon,
-            "game_type": game_type,
-            "game_name": game_name,
-            "raw_response": raw_status
+            "icon": parsed["icon"],
+            "game_type": parsed["game_type"],
+            "game_name": parsed["game_name"],
+            "raw_response": raw_status,
         }
 
-        update_home_assistant(state, attributes)
+        update_home_assistant(parsed["state"], attributes)
         time.sleep(CHECK_INTERVAL)
+
 
 if __name__ == "__main__":
     main()
