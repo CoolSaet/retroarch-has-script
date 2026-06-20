@@ -109,11 +109,11 @@ def parse_retroarch_status(raw_status):
     else:
         return parsed
 
-    parts = details.split(",")
+    parts = details.split(",", 1)
     system_id = parts[0].strip()
-    game_name = parts[1].strip() if len(parts) > 1 else ""
+    game_name = parts[1].rsplit(",crc32=", 1)[0].strip() if len(parts) > 1 else ""
 
-    if system_id and system_id.upper() != "UNKNOWN":
+    if system_id and system_id.lower() != "unknown":
         parsed["game_type"] = system_id
         parsed["icon"] = get_icon_for_game_type(system_id)
     else:
