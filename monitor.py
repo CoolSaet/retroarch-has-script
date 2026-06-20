@@ -16,7 +16,7 @@ CHECK_INTERVAL = 5  # Seconds between checks
 
 HA_URL = f"http://{HA_IP}:8123/api/states/sensor.retroarch_status"
 HEADERS = {
-    "Authorization": f"******",
+    "Authorization": f"Bearer {HA_TOKEN}",
     "Content-Type": "application/json",
 }
 
@@ -110,7 +110,7 @@ def parse_retroarch_status(raw_status):
         return parsed
 
     parts = details.split(",")
-    system_id = parts[0].strip() if len(parts) > 0 else ""
+    system_id = parts[0].strip()
     game_name = parts[1].strip() if len(parts) > 1 else ""
 
     if system_id and system_id.upper() != "UNKNOWN":
